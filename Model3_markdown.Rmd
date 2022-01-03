@@ -1,0 +1,467 @@
+---
+title: "CLG Regression Models for paper Bayesian quantile regression models for heavy tailed bounded variables using the No-U-Turn sampler"
+---
+
+```{r, message=FALSE}
+rm(list=ls())
+```
+
+Dataset and sources used in this R Markdown file can be found at https://github.com/DuSchneider/ExtremePovertyCLG
+
+First, we will load the packages which will be needed for the application.
+
+```{r, message=FALSE}
+require(rstan)
+require(loo)
+```
+
+The two sources which will be loaded next contain functions related to the proposed distributions, such as their density and cumulative distribution functions and random generators. Users can also take advantage of these functions to their own researches.
+
+```{r, message=FALSE}
+source("https://raw.githubusercontent.com/DuSchneider/ExtremePovertyCLG/main/Models-qGompertz.R")
+source("https://raw.githubusercontent.com/DuSchneider/ExtremePovertyCLG/main/LG_CLG_functions.R")
+```
+
+
+## Dataset
+
+```{r, echo=FALSE}
+#setwd(https://github.com/DuSchneider/ExtremePovertyCLG)
+datapov <-read.csv("https://raw.githubusercontent.com/DuSchneider/ExtremePovertyCLG/main/datapov_selected.csv")
+
+```
+
+Now, we will read the prepared dataset for extreme poverty in Peruvian departments. The dataset cointains the following collumns:
+
+*nomedpto: the name of the Peruvian departments
+*departamento: a numeric vector related to the departments
+*pobresextremos: extreme poverty proportion for that department
+*idh: HDI for that department
+
+```{r}
+y <- datapov$pobresextremos
+x1 <- datapov$idh 
+group <- as.numeric(datapov$departamento)
+group_name <- datapov$nomedpto
+```
+
+## Descriptive analysis
+
+We can run some previous descrpitive analysis to see how the extreme poverty behaves, in general and also within each department. We can also check its correlation with the HDI.
+
+In the summary of the response vector, that is, the extreme poverty in Peruvian departments, we can see that the median of the extreme poverty is $0.195$, with mean $0.217$, minimum $0.0004$ and maximum $0.701$. 
+
+```{r}
+summary(y)
+```
+
+For the HDI, the median is $0.570$, with mean equal to $0.578$, minimum $0.484$ and maximum $0.684$.
+
+```{r}
+summary(x1)
+```
+
+Calculating the correlation between y and x1, it is possible to see that, both using Pearson`s or Spearman correlation, there is a considerably strong correlation, which is negative.
+
+```{r}
+cat("Pearson correlation:", cor(y,x1), "\n")
+cat("Spearman correlation:", cor(y,x1, method="spearman"), "\n") 
+
+```
+
+The boxplot shows that using departments as a random variable can be useful, once they show some apparent differences in relation to the extreme poverty proportion.
+
+```{r}
+boxplot(y~group) 
+```
+
+
+The maximum group size for the evaluated departments is equal to 10, with minimum equal to 0. The median is equal to 7.
+
+```{r}
+sort(table(group_name))
+```
+
+## Running the models
+
+Now we will run the four proposed CLG models considered in Section 5.2. The quantities are:
+
+*q: represents the quantile 
+*n: the sample size 
+*M: the number of groups for the random effect
+*y: the response variable 
+*x1: the covariate 
+*id: the random effect vector
+
+In this case, a model with q=0.5 is adjusted. To adjust other quantiles, enough to change this parameter.
+
+```{r}
+data.pov.mixed<-list(q=0.5,n=length(y), M=max(group), y=y, x1=x1, id=group)
+data.pov<-list(q=0.5, n=length(y), y=y, x1=x1)
+```
+
+
+### Model I
+
+```{r}
+clg.location_code <- '
+data {
+int<lower=0> n; // number of observations 
+real<lower=0,upper=1> y[n]; // response variable 
+real x1[n]; // covariate
+real<lower=0,upper=1> q; // quantile
+}
+parameters {
+real delta0; 
+real beta0;
+real beta1;
+}
+
+transformed parameters {
+real<lower=-1> a;
+real kappa[n];
+real b[n];
+a <- exp(-delta0);
+for(i in 1:n){
+kappa[i] <- inv_logit(beta0 + beta1 * x1[i]);
+b[i] <- (a*log(1-q))/(1-pow(1-kappa[i],-a));
+}
+}
+
+model {
+beta0 ~ normal(0, 100);
+beta1 ~ normal(0, 100);
+delta0 ~ normal(0, 100);
+for(i in 1:n){
+increment_log_prob(log(b[i])+(-a-1)*log(1-y[i])-(b[i]/a)*(pow(1-y[i],-a)-1));
+}
+}
+generated quantities{
+vector[n] log_lik;
+for (i in 1:n) {
+log_lik[i] = (log(b[i])+(-a-1)*log(1-y[i])-(b[i]/a)*(pow(1-y[i],-a)-1));
+}
+}
+'
+```
+
+Inits are set as 0 for all parameters
+
+```{r}
+inits<-function(){
+  list(beta0=0,beta1=0,delta0=0.0)
+}
+```
+
+
+We run a model with 4000 iterations and 2 chains. Once we are using NUTS, half of the iterations are considered as warmup. Running time is also computed, for comparison ends. This procedure is done for all of the adjusted models.
+
+```{r}
+start.time <- Sys.time()
+fit.loc <- stan(model_code = clg.location_code, data = data.pov, 
+                iter = 4000, chains = 2,init=inits,seed=123)
+end.time <- Sys.time()
+loctime <- difftime(end.time,start.time,units = "secs")
+```
+
+
+Traceplot indicates convergence
+
+```{r}
+traceplot(fit.loc,pars=c("delta0","beta0","beta1"),inc_warmup=FALSE)
+```
+
+It is possible to check the estimates, standard deviation and credible intervals for each parameter, as well as the Rhat, which also indicates convergence.
+
+
+```{r}
+results_model_1 = round(summary(fit.loc)$summary,4)
+results_model_1[1:4,]
+```
+
+### Model II
+
+```{r}
+clg.location.dispersion_code <- '
+data {
+int<lower=0> n; // number of observations 
+real<lower=0,upper=1> y[n]; // response variable 
+real x1[n]; // covariate
+real<lower=0,upper=1> q; // quantile
+}
+parameters {
+real delta0; 
+real delta1; 
+real beta0;
+real beta1;
+}
+transformed parameters{
+real b[n];
+real kappa[n];
+real a[n];
+for(i in 1:n){
+a[i] <- exp(-delta0 - delta1*x1[i]);
+kappa[i] <- inv_logit(beta0 + beta1 * x1[i]);
+b[i] <- (a[i]*log(1-q))/(1-pow(1-kappa[i],-a[i]));
+}
+}
+model {
+beta0 ~ normal(0, 100);
+beta1 ~ normal(0, 100);
+delta0 ~ normal(0, 100);
+delta1 ~ normal(0, 100);
+for(i in 1:n){
+increment_log_prob(log(b[i])+(-a[i]-1)*log(1-y[i])-(b[i]/a[i])*(pow(1-y[i],-a[i])-1));
+}
+}
+generated quantities{
+vector[n] log_lik;
+for (i in 1:n) {
+log_lik[i] = (log(b[i])+(-a[i]-1)*log(1-y[i])-(b[i]/a[i])*(pow(1-y[i],-a[i])-1));
+}
+}
+'
+
+inits<-function(){
+  list(beta0=0,beta1=0,delta0=0.0,delta1=0)
+}
+
+
+start.time <- Sys.time()
+fit.loc.disp <- stan(model_code = clg.location.dispersion_code, data = data.pov, 
+                     iter = 4000, chains = 2,init=inits,seed=123)
+end.time <- Sys.time()
+locdisptime <- difftime(end.time,start.time,units = "secs")
+```
+
+Traceplot and rhat indicates convergence
+
+```{r}
+traceplot(fit.loc.disp,pars=c("delta0","delta1","beta0","beta1"),inc_warmup=FALSE)
+
+```
+
+```{r}
+results_model_2 = round(summary(fit.loc.disp)$summary,4)
+results_model_2[1:4,]
+```
+
+
+### Model III
+
+```{r}
+clg.location.mixed_code <- '
+data {
+int<lower=0> n; // number of observations 
+int<lower=0> M; // number of subjects 
+real<lower=0,upper=1> y[n]; // response variable 
+real x1[n]; // covariate
+int<lower=0> id[n]; // id variable
+real<lower=0,upper=1> q; // quantile
+}
+parameters {
+#real a;
+real delta0; 
+real beta0;
+real beta1;
+real<lower=0> sigma2;
+real bi[M];
+}
+transformed parameters {
+real<lower=0> sigma;       // sigma in original bugs model
+real<lower=-1> a;
+real b[n];
+real kappa[n];
+sigma <- sqrt(sigma2);
+a <- exp(-delta0);
+for(i in 1:n){
+kappa[i] <- inv_logit(beta0 + beta1 * x1[i] + bi[id[i]]);
+b[i] <- (a*log(1-q))/(1-pow(1-kappa[i],-a));
+}
+}
+model {
+for(j in 1:M){
+bi[j] ~ normal(0,sigma);
+}
+beta0 ~ normal(0, 100);
+beta1 ~ normal(0, 100);
+delta0 ~ normal(0, 100);
+sigma2 ~ inv_gamma(0.01, 0.01); 
+for(i in 1:n){
+increment_log_prob(log(b[i])+(-a-1)*log(1-y[i])-(b[i]/a)*(pow(1-y[i],-a)-1));
+}
+}
+generated quantities{
+vector[n] log_lik;
+for (i in 1:n) {
+log_lik[i] = (log(b[i])+(-a-1)*log(1-y[i])-(b[i]/a)*(pow(1-y[i],-a)-1));
+}
+}
+'
+
+inits<-function(){
+  list(beta0=0,beta1=0,delta0=0.0,bi=rep(0,max(group)),sigma2=1)
+}
+
+start.time <- Sys.time()
+fit.loc.mix <- stan(model_code = clg.location.mixed_code, data = data.pov.mixed, 
+                    iter = 4000, chains = 2,init=inits,seed=123)
+end.time <- Sys.time()
+locmixtime <- difftime(end.time,start.time,units = "secs")
+```
+
+Again, traceplot and rhat indicates convergence.
+
+```{r}
+traceplot(fit.loc.mix,pars=c("delta0","beta0",
+                             "beta1","sigma2"),inc_warmup=FALSE)
+```
+
+```{r}
+results_model_3 = round(summary(fit.loc.mix)$summary,4)
+results_model_3[1:4,]
+```
+
+### Model IV
+
+```{r}
+clg.location.dispersion.mixed_code <- '
+data {
+int<lower=0> n; // number of observations 
+int<lower=0> M; // number of subjects 
+real<lower=0,upper=1> y[n]; // response variable 
+real x1[n]; // covariate
+int<lower=0> id[n]; // id variable
+real<lower=0,upper=1> q; // quantile
+}
+parameters {
+real delta0; 
+real delta1; 
+real beta0;
+real beta1;
+real<lower=0> sigma2b;
+real<lower=0> sigma2d;
+real bib[M];
+real bid[M];
+}
+transformed parameters {
+real<lower=0> sigmab;    
+real<lower=0> sigmad;  
+real kappa[n];
+real a[n];
+real b[n];
+sigmab <- sqrt(sigma2b);
+sigmad <- sqrt(sigma2d);
+for(i in 1:n){ 
+a[i] <- exp(-delta0 - delta1 * x1[i] - bid[id[i]]);
+kappa[i] <- inv_logit(beta0 + beta1 * x1[i] + bib[id[i]]);
+b[i] <- (a[i]*log(1-q))/(1-pow(1-kappa[i],-a[i]));
+}
+}
+
+model {
+for(j in 1:M){
+bib[j] ~ normal(0,sigmab);
+bid[j] ~ normal(0,sigmad);
+}
+beta0 ~ normal(0, 100);
+beta1 ~ normal(0, 100);
+delta0 ~ normal(0, 100);
+delta1 ~ normal(0, 100);
+sigma2b ~ inv_gamma(0.01, 0.01); 
+sigma2d ~ inv_gamma(0.01, 0.01); 
+for(i in 1:n){ 
+target+= (log(b[i])+(-a[i]-1)*log(1-y[i])-(b[i]/a[i])*(pow(1-y[i],-a[i])-1));
+}
+}
+generated quantities{
+vector[n] log_lik;
+for (i in 1:n) {
+log_lik[i] = (log(b[i])+(-a[i]-1)*log(1-y[i])-(b[i]/a[i])*(pow(1-y[i],-a[i])-1));
+}
+}
+'
+
+inits<-function(){
+  list(beta0=0,beta1=0,delta0=0.0,delta1=0,bib=rep(0,max(group)),
+       bid=rep(0,max(group)),sigma2b=1,sigma2d=1)
+}
+
+start.time <- Sys.time()
+fit.loc.disp.mix <- stan(model_code = clg.location.dispersion.mixed_code, data = data.pov.mixed, 
+                         iter = 4000, chains = 2,init=inits,seed=123)
+end.time <- Sys.time()
+locdispmixtime <- difftime(end.time,start.time,units = "secs")
+```
+
+Traceplot and rhat indicates convergence
+
+```{r}
+traceplot(fit.loc.disp.mix,pars=c("delta0","delta1","beta0",
+                                  "beta1","sigma2b","sigma2d"),inc_warmup=FALSE)
+```
+
+```{r}
+results_model_4 = round(summary(fit.loc.disp.mix)$summary,4)
+results_model_4[1:6,]
+```
+
+Comparing running times, it is possible to see that adding the random effects causes the computational time to increase. However, even for model IV the fit takes less than two minutes.
+
+```{r}
+cat("Time for Model I:", loctime, "seconds \n")
+cat("Time for Model II:",locdisptime, "seconds \n")
+cat("Time for Model III:",locmixtime, "seconds \n")
+cat("Time for Model IV:",locdispmixtime, "seconds \n")
+```
+
+Comparing WAIC we have that the smallest WAIC value is found for model IV, followed closely by model III. 
+
+```{r}
+waic1 	=	waic(extract_log_lik(fit.loc))
+waic2 	=	waic(extract_log_lik(fit.loc.disp))
+waic3 	=	waic(extract_log_lik(fit.loc.mix))
+waic4 	=	waic(extract_log_lik(fit.loc.disp.mix))
+
+Results <- rbind(cbind(waic1$p_waic,waic1$waic),
+                 cbind(waic2$p_waic,waic2$waic),
+                 cbind(waic3$p_waic,waic3$waic),
+                 cbind(waic4$p_waic,waic4$waic))
+rownames(Results) <- c("Model I","Model II","Model III","Model IV")
+colnames(Results) <- c("p_waic","waic")
+
+```
+
+```{r}
+Results
+```
+
+The WAIC for the models with random effects are considerably smaller then the ones for models only with fixed effect, indicating that adding departments as random effects helps in the model fit. 
+
+Checking the results for model IV, it is possible to see that despite its WAIC value is smaller, the credible intervals of the random intercepts in the shape coeffcient include 0 for all of them in model IV, indicating that this effect is unnecessary. We procceed the analysis for model III.
+
+
+```{r}
+results_model_3
+
+results_model_4
+
+fit.loc.mix
+```
+
+
+Looking at the normalized residuals, we can see that they do not have any point greater then 3 in absolute value.
+ 
+```{r}
+a.locmix <- colMeans(colMeans(extract(fit.loc.mix, "a", inc_warmup=FALSE, permuted=F)))
+kappa.locmix <- colMeans(colMeans(extract(fit.loc.mix, "kappa", inc_warmup=FALSE, permuted=F)))
+q0 <- 0.5
+
+qrlocmix <- pCLG(y,kappa.locmix,a.locmix)
+qr2locmix <- qnorm(qrlocmix)
+
+plot(qr2locmix,ylim=c(-4.5,4.5),ylab="Quantile residuals")
+abline(3,0,lty=1)
+abline(-3,0,lty=1)
+abline(0,0,lty=3)
+```
