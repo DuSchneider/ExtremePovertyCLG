@@ -1,18 +1,18 @@
 ## March, 2022
 ## Function library
-
+#
 # Parameters: quantile (kappa) and a
 # mu: kappa 
 # sigma: a
 # q0: prob. for the quantile
-
+#
 library(gamlss)
 library(gamlss.dist)
-
+#
 ## Distributions generated from the Gompertz distribution
 # Distribution 1
 # Transformation: exp(-x)
-
+#
 # Probability density function
 # mu = kappa (quantile) and sigma = a
 dLG <- function (y, mu = 0.5, sigma = 1, log = FALSE) 
@@ -31,7 +31,7 @@ dLG <- function (y, mu = 0.5, sigma = 1, log = FALSE)
     if (log == TRUE) fy <- log(fy)
     fy   
 }
-
+#
 # Cumulative distribution function
 # mu = kappa (quantile) and sigma = a
 pLG <- function (q, mu = 0.5, sigma = 1, lower.tail = TRUE, 
@@ -51,11 +51,11 @@ pLG <- function (q, mu = 0.5, sigma = 1, lower.tail = TRUE,
     if (log.p == TRUE)  cdf <- log(cdf)   
     cdf    
 }
-
+#
 # Random number generation
 # mu = kappa (quantile) and sigma = a
 # (sigma > 0)
-
+#
 rLG <- function (n, mu = 0.5, sigma = 1 , q0 = 0.5) {
   if (any(mu <= 0) | (any(mu >= 1)))
     stop(paste("mu must be in [0, 1] ", "\n", ""))    
@@ -66,7 +66,7 @@ rLG <- function (n, mu = 0.5, sigma = 1 , q0 = 0.5) {
   r <- (1 - (sigma * log(runif(n))/b) )^(-1 / sigma)
   r <- ifelse(is.na(r)==TRUE,1,r)
 } 
-
+#
 # Family
 # mu = kappa (quantile) and sigma = a
 LG = function (mu.link = "logit", sigma.link = "identity")
@@ -136,10 +136,10 @@ LG = function (mu.link = "logit", sigma.link = "identity")
         y.valid = function(y) all(y >= 0) | all(y <= 1)), 
         class = c("gamlss.family", "family"))
 }
-
+#
 ## Distribution 2
 # Transformation: 1 - exp(-x)
-
+#
 # Probability density function
 # mu = kappa (quantile) and sigma = a
 dCLG <- function (y, mu = 0.5, sigma = 1, log = FALSE) 
@@ -159,7 +159,7 @@ dCLG <- function (y, mu = 0.5, sigma = 1, log = FALSE)
    if (log == TRUE) fy <- log(fy)
    fy   
 }
-
+#
 # Cumulative distribution function
 # mu = kappa (quantile) and sigma = a
 pCLG <- function (q, mu = 0.5, sigma = 1, lower.tail = TRUE, 
@@ -179,11 +179,11 @@ pCLG <- function (q, mu = 0.5, sigma = 1, lower.tail = TRUE,
    if (log.p == TRUE)  cdf <- log(cdf)   
    cdf    
 }
-
+#
 # Random number generation
 # mu = kappa (quantile) and sigma = a
 # (sigma > 0)
-
+#
 rCLG <- function (n, mu = 0.5, sigma = 1 , q0 = 0.5) {
   if (any(mu <= 0) | (any(mu >= 1)))
     stop(paste("mu must be in [0, 1] ", "\n", ""))    
@@ -194,7 +194,7 @@ rCLG <- function (n, mu = 0.5, sigma = 1 , q0 = 0.5) {
   r <- 1-(1- (sigma * log(1-runif(n)) / b) )^(-1 / sigma)
   #r <- min(r,0.98)
 } 
-
+#
 # Family
 # mu = kappa (quantile) and sigma = a
 CLG = function (mu.link = "logit", sigma.link = "identity")
