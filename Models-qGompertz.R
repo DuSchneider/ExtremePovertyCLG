@@ -1,11 +1,10 @@
-
 ## March, 2022
+## Function library
 
 # Parameters: quantile (kappa) and a
-#             mu: kappa e sigma: a
+# mu: kappa 
+# sigma: a
 # q0: prob. for the quantile
-
-## Function library
 
 library(gamlss)
 library(gamlss.dist)
